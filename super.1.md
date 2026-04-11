@@ -18,15 +18,17 @@ super - process data with SuperSQL queries
 
 When invoked without a sub-command and with either a query or input paths, **super** runs the SuperDB query engine standalone. Input may be specified as command-line paths, via HTTP/HTTPS/S3 URLs, or read from standard input using `-` as the path. Inputs may also be referenced directly within the query using a **from** operator or a SQL `FROM` clause.
 
-When multiple input files are specified, they are processed in order as if concatenated into a single **from** clause. If no input is specified, the query receives a single `null` value, enabling use as a calculator or for standalone expressions.
+When multiple input files are specified they are processed in order as if concatenated into a single **from** clause. If no input is specified, the query receives a single `null` value, enabling use as a calculator or for standalone expressions.
 
-Format detection is automatic for files with recognized extensions (`.json`, `.parquet`, `.sup`, etc.) and for standard input **super** attempts to detect the format by reading and parsing a portion of the data. The `line` format cannot be auto-detected and requires explicit `-i line`. Parquet and CSUP require seekable input and cannot be read from standard input.
+Format detection is automatic for files with recognized extensions (`.json`, `.parquet`, `.sup`, etc.) and for standard input **super** attempts to detect the format by reading a sample of the data. The `line` format cannot be auto-detected and requires explicit `-i line`. When `-i` is used, all input files must share the same format; without it, each file's format is determined independently. Parquet and CSUP require seekable input and cannot be read from standard input.
 
-When writing to a terminal, the default output format is SUP. Otherwise, the default is BSUP. These defaults may be overridden with `-f`, `-s`, or `-S`.
+Output is written to standard output by default. When stdout is a terminal the default output format is SUP; otherwise it is BSUP. These defaults may be overridden with `-f`, `-s`, or `-S`. If no query is specified with `-c`, inputs are scanned and re-serialized in the requested output format, providing a convenient format-conversion path.
 
-Fatal errors such as file-not-found or filesystem-full cause **super** to exit immediately. Runtime errors produced by the query itself do not halt execution; instead they appear as first-class error values interleaved with normal output in the data stream. These can be identified and filtered using the **is_error** function.
+Certain output formats (Arrow, Parquet) are schema-rigid and require all values to conform to a single schema. To write heterogeneous super-structured data to these formats, use the **fuse** or **blend** operator to unify types, or use `-split` to write one file per distinct type.
 
-The `-C` flag compiles and displays the query in canonical form without executing it, which is useful for understanding how abbreviated SuperSQL syntax is expanded.
+Fatal errors such as missing files or full filesystems cause **super** to exit immediately. Runtime errors produced by the query itself do not halt execution; instead they appear as first-class error values interleaved with normal output and can be detected with the **is_error** function.
+
+The `-C` flag compiles and displays a query in canonical form without executing it, which is useful for understanding how abbreviated SuperSQL syntax expands into full pipe-query form.
 
 # OPTIONS
 
@@ -51,6 +53,12 @@ The `-C` flag compiles and displays the query in canonical form without executin
 
 **-c** *query*
 :   SuperSQL query to execute; may be used multiple times.
+
+**-C**
+:   Display parsed AST in a textual format without executing (default "false").
+
+**-dynamic**
+:   Disable static type checking of inputs (default "false").
 
 **-e**
 :   Stop upon input errors (default "true").
@@ -90,9 +98,6 @@ The `-C` flag compiles and displays the query in canonical form without executin
 **-csv.delim** *char*
 :   CSV field delimiter (default ",").
 
-**-dynamic**
-:   Disable static type checking of inputs (default "false").
-
 **-e**
 :   Stop upon input errors (default "true").
 
@@ -113,11 +118,8 @@ The `-C` flag compiles and displays the query in canonical form without executin
 **-bsup.framethresh** *bytes*
 :   Minimum Super Binary frame size in uncompressed bytes (default "524288").
 
-**-C**
-:   Display parsed AST in a textual format (default "false").
-
 **-color**
-:   Enable or disable color formatting for **-S** and db text output (default "true").
+:   Enable/disable color formatting for `-S` and db text output (default "true").
 
 **-f** *format*
 :   Format for output data: `arrows`, `bsup`, `csup`, `csv`, `db`, `json`, `jsup`, `line`, `parquet`, `sup`, `table`, `tsv`, `zeek` (default "bsup").
@@ -147,10 +149,10 @@ The `-C` flag compiles and displays the query in canonical form without executin
 :   Shortcut for `-f sup -pretty 0`, i.e., line-oriented SUP (default "false").
 
 **-split** *dir*
-:   Split output into one file per data type in the specified directory.
+:   Split output into one file per data type in the specified directory (see also `-splitsize`).
 
 **-splitsize** *size*
-:   If greater than 0 and **-split** is set, split into files at least this large rather than by data type (default "0B").
+:   If greater than 0 and `-split` is set, split into files at least this large rather than by data type (default "0B").
 
 **-unbuffered**
 :   Disable output buffering (default "false").
@@ -168,23 +170,23 @@ The `-C` flag compiles and displays the query in canonical form without executin
 
 # OUTPUT
 
-Output is written to standard output by default, or to the file or directory specified by **-o**. When stdout is a terminal, the default format is SUP; otherwise BSUP. All output originates in super-structured form and is serialized to the requested format.
+Output is always produced in super-structured form and serialized to the format specified by `-f`. The supported output formats are: `arrows`, `bsup`, `csup`, `csv`, `db`, `json`, `jsup`, `line`, `parquet`, `sup`, `table`, `tsv`, and `zeek`.
 
-Supported output formats include `arrows` (Arrow IPC Stream), `bsup` (Super Binary), `csup` (Columnar Super Binary), `csv` (RFC 4180), `db` (SuperDB lake metadata text), `json` (RFC 8259), `jsup` (Super over JSON), `line` (one value per line), `parquet` (Apache Parquet), `sup` (SUP text), `table`, `tsv`, and `zeek`.
+When writing to a terminal the default format is SUP; otherwise BSUP. The `db` format pretty-prints lake metadata as produced by `super db` sub-commands.
 
-Schema-rigid formats such as Arrow and Parquet require all values to conform to a single schema. When the input contains heterogeneous types, use the **fuse** or **blend** operator to unify types, or use **-split** to write one file per distinct type. The **-splitsize** option causes splitting by file size rather than by type when combined with **-split**.
+The `line` format writes one value per line. String values are printed as-is with escape sequences rendered as their native characters; non-string values are formatted as SUP. The `line` format cannot be auto-detected on input and requires `-i line`.
 
-SUP and JSON output may be pretty-printed with **-pretty**, **-S**, or **-J**. Colorization is enabled by default when writing to a terminal and can be disabled with `-color false`.
+SUP and JSON output may be pretty-printed with `-pretty`, `-S`, or `-J`. Colorization is enabled by default when writing to a terminal and can be disabled with `-color false`.
 
-The `line` output format writes one value per line; string values are printed as-is with escape sequences rendered as their native characters. Non-string values are formatted as SUP.
+BSUP and CSUP are self-describing, stream-oriented, and pipeline-friendly. Super-structured output from one **super** invocation can be piped directly into another without schema registration.
 
-Runtime errors appear as first-class error values in the output stream and can be identified with the **is_error** function.
+For schema-rigid formats (Arrow, Parquet), heterogeneous data must be unified before writing. Use the **fuse** or **blend** operator to produce a single type, or use `-split` to write one file per distinct output type. Files written with `-split` are named using the `-o` value as a prefix with a `-<n>.<ext>` suffix.
 
 # ERRORS
 
-Fatal errors (e.g., file not found, filesystem full) cause **super** to exit immediately with a non-zero status.
+Fatal errors (e.g., file not found, filesystem full) are reported immediately and cause **super** to exit.
 
-Query runtime errors do not halt execution. They produce first-class error values in the output stream, interleaved with valid results. Use **is_error** to filter or inspect them. Errors may be wrapped to provide stack-trace-like debugging output alongside result data.
+Runtime query errors do not halt execution. They appear as first-class error values interleaved with normal output in the data stream. These errors can be detected and filtered using the **is_error** function. Errors may be wrapped in one another, providing stack-trace-like debugging output alongside result data.
 
 # EXAMPLES
 
@@ -310,6 +312,6 @@ from logs.json
 
 SuperDB documentation: https://superdb.org
 
-**super** command reference: https://superdb.org/command/super.html
+`super` command reference: https://superdb.org/command/super.html
 
 SuperSQL language reference: https://superdb.org/super-sql/intro.html
